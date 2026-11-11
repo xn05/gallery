@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery</title>
+<style>
+  :root {
+    --bg: #0b0c10;
+    --card: #14161c;
+    --text: #e8eaf0;
+    --muted: #8a90a0;
+    --accent: #ff4d3d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -200px, #1d2130 0%, var(--bg) 60%) no-repeat, var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  header { text-align: center; padding: 64px 20px 32px; }
+  header h1 {
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+  header h1 span { color: var(--accent); }
+  header p { color: var(--muted); margin-top: 10px; }
+  main {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 20px 20px 80px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    gap: 22px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1px solid #ffffff10;
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 18px 40px #000a;
+    border-color: var(--accent);
+  }
+  .card .img-wrap { aspect-ratio: 4 / 3; overflow: hidden; background: #0f1117; }
+  .card img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform .5s ease;
+  }
+  .card:hover img { transform: scale(1.06); }
+  .card h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 14px 18px 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .msg { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 40px 0; line-height: 1.6; }
+  .msg code { background: #ffffff12; padding: 2px 6px; border-radius: 6px; }
+
+  #lightbox {
+    position: fixed; inset: 0;
+    background: #000d;
+    backdrop-filter: blur(6px);
+    display: none;
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+    padding: 24px;
+    z-index: 10;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 100%; max-height: 80vh; border-radius: 12px; box-shadow: 0 20px 60px #000; }
+  #lightbox p { font-size: 1.2rem; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gallery</h1>
+  <p id="count"></p>
+</header>
+
+<main id="grid"><div class="msg">Loading…</div></main>
+
+<div id="lightbox"><img alt=""><p></p></div>
+
+<script>
+const IMG_DIR = "images/";
+const IMG_EXT = /\.(jpe?g|png|gif|webp|avif|bmp|svg)$/i;
+
+const grid = document.getElementById("grid");
+const countEl = document.getElementById("count");
+const lightbox = document.getElementById("lightbox");
+
+const nameOf = file => decodeURIComponent(file).replace(/\.[^.]+$/, "");
+
+// Only set these if the auto-detection below gets it wrong (e.g. custom domain).
+const GITHUB_OWNER = "";   // e.g. "yourname"
+const GITHUB_REPO  = "";   // e.g. "car-gallery"
+
+// Works out the repo from the GitHub Pages URL:
+//   yourname.github.io/car-gallery/  -> yourname / car-gallery
+//   yourname.github.io/              -> yourname / yourname.github.io
+function detectRepo() {
+  if (GITHUB_OWNER && GITHUB_REPO) return { owner: GITHUB_OWNER, repo: GITHUB_REPO };
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  if (!m) return null;
+  const first = location.pathname.split("/").filter(Boolean)[0];
+  const looksLikeFile = !first || /\.[a-z0-9]+$/i.test(first);
+  return { owner: m[1], repo: looksLikeFile ? m[1] + ".github.io" : first };
+}
+
+// 1) Ask the GitHub API what's in /images/ (no build step, no server)
+// 2) Fall back to a plain folder listing (handy when previewing locally)
+async function getImageList() {
+  const gh = detectRepo();
+  if (gh) {
+    try {
+      const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/images`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const items = await res.json();
+        return items.filter(i => i.type === "file" && IMG_EXT.test(i.name)).map(i => i.name);
+      }
+    } catch (e) {}
+  }
+
+  try {
+    const res = await fetch(IMG_DIR);
+    if (res.ok) {
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const files = [...doc.querySelectorAll("a")]
+        .map(a => (a.getAttribute("href") || "").split("?")[0].split("/").pop())
+        .filter(f => IMG_EXT.test(decodeURIComponent(f)))
+        .map(f => decodeURIComponent(f));
+      if (files.length) return [...new Set(files)];
+    }
+  } catch (e) {}
+  return [];
+}
+
+function render(files) {
+  grid.innerHTML = "";
+  if (!files.length) {
+    grid.innerHTML = `<div class="msg">No images found in <code>/images/</code>.<br>
+      Make sure the folder exists in your repo, or set <code>GITHUB_OWNER</code> and <code>GITHUB_REPO</code> at the top of the script.</div>`;
+    return;
+  }
+  files.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true }));
+  const encode = f => IMG_DIR + encodeURIComponent(f);
+  countEl.textContent = `${files.length} car${files.length === 1 ? "" : "s"}`;
+
+  for (const file of files) {
+    const name = nameOf(file);
+    const src = encode(file);
+    const card = document.createElement("article");
+    card.className = "card";
+    card.innerHTML = `<div class="img-wrap"><img loading="lazy" src="${src}" alt=""></div><h2></h2>`;
+    card.querySelector("img").alt = name;
+    card.querySelector("h2").textContent = name;
+    card.addEventListener("click", () => {
+      lightbox.querySelector("img").src = src;
+      lightbox.querySelector("img").alt = name;
+      lightbox.querySelector("p").textContent = name;
+      lightbox.classList.add("open");
+    });
+    grid.appendChild(card);
+  }
+}
+
+lightbox.addEventListener("click", () => lightbox.classList.remove("open"));
+document.addEventListener("keydown", e => { if (e.key === "Escape") lightbox.classList.remove("open"); });
+
+getImageList().then(render);
+</script>
+</body>
+</html>
